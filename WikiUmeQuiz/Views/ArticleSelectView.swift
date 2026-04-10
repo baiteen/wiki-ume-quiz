@@ -2,8 +2,11 @@ import SwiftUI
 
 /// 記事選択画面
 ///
-/// 記事のプレビュー（冒頭 3 行）と難易度選択 UI を表示し、
+/// 記事タイトルと難易度選択 UI を表示し、
 /// スタートボタンで `QuizView` に遷移する。
+///
+/// Phase 8: 答えが見えてしまうため記事プレビュー本文の表示を廃止。
+/// タイトルのみ大きく表示する。
 ///
 /// 記事取得・クイズ生成は `ArticleSelectViewModel` に委譲する。
 struct ArticleSelectView: View {
@@ -22,6 +25,13 @@ struct ArticleSelectView: View {
 
     @State private var viewModel: ArticleSelectViewModel
     @State private var selectedDifficulty: QuizDifficulty = .normal
+
+    /// スタートボタン押下からクイズ生成完了までのローディング状態
+    ///
+    /// Phase 8: ボタン押下のフィードバックが無く「押せたかどうか分からない」
+    /// という実機フィードバックを受けて追加。`true` の間はボタンを
+    /// `ProgressView` 付きの「クイズを生成中...」表示に切り替え、二重押下も防ぐ。
+    @State private var isGeneratingQuiz: Bool = false
 
     /// ルート `HomeView` から渡される共有ナビゲーションスタック
     ///
@@ -50,7 +60,9 @@ struct ArticleSelectView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Self.verticalSpacing) {
                 Text(articleTitle)
-                    .font(.title2.bold())
+                    .font(.title.bold())
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding(.top)
 
                 if viewModel.isLoading {
                     loadingIndicator
@@ -78,12 +90,17 @@ struct ArticleSelectView: View {
             .padding()
     }
 
-    /// 記事取得完了後に表示するプレビュー＋難易度選択＋スタートボタン
+    /// 記事取得完了後に表示する難易度選択＋スタートボタン
+    ///
+    /// Phase 8: 答えが見えてしまうため記事プレビュー本文の表示は廃止し、
+    /// 「準備できたよ」というシンプルな案内に置き換えている。
     private var loadedContent: some View {
         VStack(alignment: .leading, spacing: Self.verticalSpacing) {
-            Text(viewModel.previewText)
+            Text("記事の準備ができました。難易度を選んでスタートしてください。")
                 .font(.body)
                 .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .multilineTextAlignment(.center)
 
             Text("難易度を選んでください")
                 .font(.headline)
@@ -130,23 +147,53 @@ struct ArticleSelectView: View {
     ///
     /// タップ時に `QuizGenerator` でクイズを生成し、
     /// 共有 `navigationPath` に `QuizRoute` を append して `QuizView` へ遷移する。
+    ///
+    /// Phase 8: クイズ生成は同期処理だが大きな記事だと体感で 1〜2 秒固まるため、
+    /// `isGeneratingQuiz` フラグでローディング表示を出してフィードバックを返す。
+    /// `Task.yield()` を一度挟んで描画を更新したあとに重い生成処理を実行する。
     private var startButton: some View {
         Button {
-            if let quiz = viewModel.startQuiz(difficulty: selectedDifficulty) {
-                navigationPath.append(
-                    QuizRoute(quiz: quiz, articleTitle: articleTitle)
-                )
-            }
+            startQuiz()
         } label: {
-            Text("スタート")
-                .font(.headline)
-                .frame(maxWidth: .infinity)
-                .padding()
-                .background(Self.themeColor)
-                .foregroundColor(.white)
-                .cornerRadius(Self.cornerRadius)
+            HStack(spacing: 8) {
+                if isGeneratingQuiz {
+                    ProgressView()
+                        .tint(.white)
+                    Text("クイズを生成中...")
+                } else {
+                    Text("スタート")
+                }
+            }
+            .font(.headline)
+            .frame(maxWidth: .infinity)
+            .padding()
+            .background(Self.themeColor)
+            .foregroundColor(.white)
+            .cornerRadius(Self.cornerRadius)
         }
-        .disabled(viewModel.fullText.isEmpty)
+        .disabled(viewModel.fullText.isEmpty || isGeneratingQuiz)
+    }
+
+    /// スタートボタン押下時の処理
+    ///
+    /// 1. ローディング状態へ遷移してボタン表示を切り替える
+    /// 2. `Task.yield()` で UI 更新を一度走らせる
+    /// 3. クイズを生成して画面遷移
+    /// 4. ローディング状態を解除（遷移済みでも安全なように必ず実行）
+    private func startQuiz() {
+        guard !isGeneratingQuiz else { return }
+        isGeneratingQuiz = true
+        Task { @MainActor in
+            // UI に "クイズを生成中..." を反映する隙を与える
+            await Task.yield()
+            defer { isGeneratingQuiz = false }
+            guard let quiz = viewModel.startQuiz(difficulty: selectedDifficulty) else {
+                return
+            }
+            navigationPath.append(
+                QuizRoute(quiz: quiz, articleTitle: articleTitle)
+            )
+        }
     }
 
     // MARK: - Helpers
