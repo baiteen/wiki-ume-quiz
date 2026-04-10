@@ -4,7 +4,8 @@ import Foundation
 ///
 /// `QuizViewModel` が各問題の解答送信・ギブアップ時に生成し、
 /// 結果画面（Phase 4）で一覧表示する際にも利用する。
-struct QuizAnswerResult: Identifiable, Equatable {
+/// `Hashable` は `NavigationPath` で `ResultRoute` などに含めて遷移するために必要。
+struct QuizAnswerResult: Identifiable, Equatable, Hashable {
     /// SwiftUI 一覧描画用の ID
     let id: UUID
     /// 出題番号（`QuizQuestion.number` と対応）

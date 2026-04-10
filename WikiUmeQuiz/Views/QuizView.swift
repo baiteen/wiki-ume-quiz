@@ -9,7 +9,8 @@ import SwiftUI
 /// - 経過時間・進捗・直近の解答結果の表示
 ///
 /// クイズの状態管理は `QuizViewModel` に委譲する。
-/// 完了時は `onComplete` コールバックで親 View に通知し、結果画面（Phase 4）へ遷移する。
+/// Phase 7 以降は完了時に親 `HomeView` 由来の `navigationPath` に
+/// `ResultRoute` を append して `ResultView` へ遷移する。
 struct QuizView: View {
 
     // MARK: - Layout constants
@@ -22,10 +23,9 @@ struct QuizView: View {
     @State var viewModel: QuizViewModel
     @State private var userInput: String = ""
     @FocusState private var isInputFocused: Bool
-    @Environment(\.dismiss) private var dismiss
 
-    /// 完了時コールバック（結果画面への遷移トリガ）
-    var onComplete: (QuizViewModel) -> Void = { _ in }
+    /// 共有ナビゲーションスタック。完了時に `ResultRoute` を append する。
+    @Binding var navigationPath: NavigationPath
 
     // MARK: - Body
 
@@ -51,6 +51,8 @@ struct QuizView: View {
         }
         .navigationTitle(viewModel.articleTitle)
         .navigationBarTitleDisplayMode(.inline)
+        // 完了後にスワイプで戻ってもクイズ途中状態に戻れないようにする
+        .navigationBarBackButtonHidden(viewModel.isCompleted)
         .onAppear {
             viewModel.startTimer()
             isInputFocused = true
@@ -60,9 +62,26 @@ struct QuizView: View {
         }
         .onChange(of: viewModel.isCompleted) { _, completed in
             if completed {
-                onComplete(viewModel)
+                navigateToResult()
             }
         }
+    }
+
+    // MARK: - Navigation
+
+    /// `QuizViewModel` の状態から `ResultRoute` を構築し、
+    /// `navigationPath` に append してリザルト画面へ遷移する
+    private func navigateToResult() {
+        let route = ResultRoute(
+            articleTitle: viewModel.articleTitle,
+            difficulty: viewModel.quiz.difficulty,
+            correctCount: viewModel.correctCount,
+            totalCount: viewModel.totalCount,
+            timeSeconds: viewModel.elapsedSeconds,
+            hintsUsed: viewModel.hintsUsed,
+            results: viewModel.results
+        )
+        navigationPath.append(route)
     }
 
     // MARK: - Header
@@ -180,7 +199,22 @@ struct QuizView: View {
         ],
         difficulty: .normal
     )
-    return NavigationStack {
-        QuizView(viewModel: QuizViewModel(quiz: quiz, articleTitle: "東京タワー"))
+    return QuizViewPreviewWrapper(quiz: quiz)
+}
+
+/// `QuizView` のプレビュー用ラッパー
+///
+/// `@State` の `NavigationPath` を生成して `Binding` を渡すための容器。
+private struct QuizViewPreviewWrapper: View {
+    let quiz: Quiz
+    @State private var path = NavigationPath()
+
+    var body: some View {
+        NavigationStack(path: $path) {
+            QuizView(
+                viewModel: QuizViewModel(quiz: quiz, articleTitle: "東京タワー"),
+                navigationPath: $path
+            )
+        }
     }
 }

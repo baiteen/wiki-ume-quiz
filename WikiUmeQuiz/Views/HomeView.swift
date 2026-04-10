@@ -21,6 +21,15 @@ struct HomeView: View {
     @State private var viewModel: HomeViewModel
     @State private var searchTask: Task<Void, Never>?
 
+    /// アプリ全体の画面遷移を一元管理するナビゲーションスタック
+    ///
+    /// Phase 7 で導入。以下の遷移を 1 つの `NavigationStack` で扱うことで
+    /// リザルト画面からの「別の記事」（popToRoot）を実装可能にする。
+    /// - `String` → `ArticleSelectView`
+    /// - `QuizRoute` → `QuizView`
+    /// - `ResultRoute` → `ResultView`
+    @State private var navigationPath = NavigationPath()
+
     /// SwiftData のモデルコンテキスト（履歴読込に使用）
     @Environment(\.modelContext) private var modelContext
 
@@ -37,7 +46,7 @@ struct HomeView: View {
     // MARK: - Body
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $navigationPath) {
             List {
                 statusSection
 
@@ -64,7 +73,30 @@ struct HomeView: View {
             .navigationDestination(for: String.self) { title in
                 ArticleSelectView(
                     articleTitle: title,
-                    wikipediaService: wikipediaService
+                    wikipediaService: wikipediaService,
+                    navigationPath: $navigationPath
+                )
+            }
+            .navigationDestination(for: QuizRoute.self) { route in
+                QuizView(
+                    viewModel: QuizViewModel(
+                        quiz: route.quiz,
+                        articleTitle: route.articleTitle
+                    ),
+                    navigationPath: $navigationPath
+                )
+            }
+            .navigationDestination(for: ResultRoute.self) { route in
+                ResultView(
+                    articleTitle: route.articleTitle,
+                    difficulty: route.difficulty,
+                    correctCount: route.correctCount,
+                    totalCount: route.totalCount,
+                    timeSeconds: route.timeSeconds,
+                    hintsUsed: route.hintsUsed,
+                    results: route.results,
+                    onRetry: { navigationPath = NavigationPath() },
+                    onBackHome: { navigationPath = NavigationPath() }
                 )
             }
             .searchable(text: $viewModel.query, prompt: "記事を検索")
@@ -174,6 +206,10 @@ struct HomeView: View {
 ///
 /// `Category.recommendedArticles` に定義された固定リストを表示し、
 /// タップで `ArticleSelectView` に遷移する。
+///
+/// `navigationDestination(for: String.self)` は親の `HomeView`
+/// （同一 `NavigationStack` のルート）側で定義されているため、
+/// ここでは `NavigationLink(value:)` で値を積むだけでよい。
 struct CategoryArticlesView: View {
     let category: Category
     let wikipediaService: WikipediaServiceProtocol
@@ -185,12 +221,6 @@ struct CategoryArticlesView: View {
             }
         }
         .navigationTitle(category.rawValue)
-        .navigationDestination(for: String.self) { title in
-            ArticleSelectView(
-                articleTitle: title,
-                wikipediaService: wikipediaService
-            )
-        }
     }
 }
 
