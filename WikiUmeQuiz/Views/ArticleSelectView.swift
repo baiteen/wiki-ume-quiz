@@ -22,19 +22,26 @@ struct ArticleSelectView: View {
 
     @State private var viewModel: ArticleSelectViewModel
     @State private var selectedDifficulty: QuizDifficulty = .normal
-    @State private var quizToStart: Quiz?
+
+    /// ルート `HomeView` から渡される共有ナビゲーションスタック
+    ///
+    /// スタートボタン押下時に `QuizRoute` を append することで
+    /// `QuizView` に遷移する。Phase 7 で追加。
+    @Binding var navigationPath: NavigationPath
 
     // MARK: - Init
 
     init(
         articleTitle: String,
-        wikipediaService: WikipediaServiceProtocol = WikipediaService()
+        wikipediaService: WikipediaServiceProtocol = WikipediaService(),
+        navigationPath: Binding<NavigationPath>
     ) {
         self.articleTitle = articleTitle
         self._viewModel = State(initialValue: ArticleSelectViewModel(
             articleTitle: articleTitle,
             wikipediaService: wikipediaService
         ))
+        self._navigationPath = navigationPath
     }
 
     // MARK: - Body
@@ -58,11 +65,6 @@ struct ArticleSelectView: View {
         }
         .navigationTitle("記事選択")
         .navigationBarTitleDisplayMode(.inline)
-        .navigationDestination(item: $quizToStart) { quiz in
-            QuizView(
-                viewModel: QuizViewModel(quiz: quiz, articleTitle: articleTitle)
-            )
-        }
         .task {
             await viewModel.loadArticle()
         }
@@ -125,10 +127,15 @@ struct ArticleSelectView: View {
     }
 
     /// クイズ開始ボタン
+    ///
+    /// タップ時に `QuizGenerator` でクイズを生成し、
+    /// 共有 `navigationPath` に `QuizRoute` を append して `QuizView` へ遷移する。
     private var startButton: some View {
         Button {
             if let quiz = viewModel.startQuiz(difficulty: selectedDifficulty) {
-                quizToStart = quiz
+                navigationPath.append(
+                    QuizRoute(quiz: quiz, articleTitle: articleTitle)
+                )
             }
         } label: {
             Text("スタート")
