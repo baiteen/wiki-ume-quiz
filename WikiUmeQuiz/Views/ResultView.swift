@@ -1,10 +1,15 @@
 import SwiftUI
+import SwiftData
 
 /// クイズ終了後のリザルト画面
 ///
 /// 正解数・正解率・タイム・ヒント使用回数・スコアの統計表示と
 /// 解答一覧、「もう一回」「別の記事」ボタンを提供する。
 /// スコア計算は `ScoreCalculator` に委譲し、このビューは表示責務のみを持つ。
+///
+/// Phase 6: 画面表示時に `PlayHistoryRepository` 経由で
+/// プレイ履歴を SwiftData に自動保存する。再表示時の二重保存を避けるため
+/// `@State saved` フラグでガードする。
 struct ResultView: View {
 
     // MARK: - Layout constants
@@ -40,6 +45,14 @@ struct ResultView: View {
     /// 「別の記事」ボタン押下時のコールバック（ホームへ戻す想定）
     var onBackHome: () -> Void = {}
 
+    // MARK: - SwiftData
+
+    /// プレイ履歴保存用の SwiftData コンテキスト
+    @Environment(\.modelContext) private var modelContext
+
+    /// 二重保存防止フラグ（再描画・再表示時の多重 insert を避ける）
+    @State private var hasSavedHistory: Bool = false
+
     // MARK: - Derived values
 
     /// 計算済みスコア（`ScoreCalculator` に委譲）
@@ -70,6 +83,32 @@ struct ResultView: View {
         }
         .navigationTitle("リザルト")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            savePlayHistoryIfNeeded()
+        }
+    }
+
+    // MARK: - Persistence
+
+    /// 画面表示時に 1 度だけプレイ履歴を保存する
+    ///
+    /// 同じ `ResultView` が複数回 `onAppear` を受け取っても
+    /// `hasSavedHistory` フラグにより多重保存されないようにしている。
+    /// 同一記事の再プレイは別インスタンスで表示されるため、別レコードとして保存される（仕様）。
+    private func savePlayHistoryIfNeeded() {
+        guard !hasSavedHistory else { return }
+        hasSavedHistory = true
+
+        let repository = PlayHistoryRepository(context: modelContext)
+        repository.save(
+            articleTitle: articleTitle,
+            difficulty: difficulty,
+            score: score,
+            correctCount: correctCount,
+            totalCount: totalCount,
+            timeSeconds: timeSeconds,
+            hintsUsed: hintsUsed
+        )
     }
 
     // MARK: - Sections
@@ -234,4 +273,5 @@ private struct AnswerRow: View {
             ]
         )
     }
+    .modelContainer(for: PlayHistory.self, inMemory: true)
 }

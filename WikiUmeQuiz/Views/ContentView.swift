@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 /// アプリのルート View
 ///
@@ -11,4 +12,5 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
+        .modelContainer(for: PlayHistory.self, inMemory: true)
 }

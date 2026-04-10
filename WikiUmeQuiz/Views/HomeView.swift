@@ -1,4 +1,5 @@
 import SwiftUI
+import SwiftData
 
 /// ホーム画面
 ///
@@ -7,8 +8,7 @@ import SwiftUI
 /// - 検索結果一覧の表示
 /// - カテゴリ一覧（`Category`）の表示と、カテゴリ別記事一覧への遷移
 /// - 記事選択時の `ArticleSelectView` への遷移
-///
-/// Phase 6 で「最近プレイした記事」を SwiftData から表示する想定。
+/// - 最近プレイした記事一覧（SwiftData 永続化）の表示
 struct HomeView: View {
 
     // MARK: - Constants
@@ -20,6 +20,9 @@ struct HomeView: View {
 
     @State private var viewModel: HomeViewModel
     @State private var searchTask: Task<Void, Never>?
+
+    /// SwiftData のモデルコンテキスト（履歴読込に使用）
+    @Environment(\.modelContext) private var modelContext
 
     /// View 注入のために WikipediaService を DI できるようにする
     private let wikipediaService: WikipediaServiceProtocol
@@ -53,6 +56,8 @@ struct HomeView: View {
                     }
                 }
 
+                recentHistoriesSection
+
                 categoriesSection
             }
             .navigationTitle("ウィキうめクイズ")
@@ -65,6 +70,10 @@ struct HomeView: View {
             .searchable(text: $viewModel.query, prompt: "記事を検索")
             .onChange(of: viewModel.query) { _, _ in
                 scheduleSearch()
+            }
+            .task {
+                // 画面表示時に最近プレイした履歴を読み込む
+                viewModel.loadRecentHistories(context: modelContext)
             }
         }
     }
@@ -85,6 +94,38 @@ struct HomeView: View {
             Text(error)
                 .foregroundStyle(.red)
                 .font(.caption)
+        }
+    }
+
+    /// 「最近プレイした記事」セクション
+    ///
+    /// SwiftData から読み込んだ履歴を最新順に最大 `HomeViewModel.recentHistoriesLimit` 件表示する。
+    /// 空の場合はセクションごと非表示にする。
+    @ViewBuilder
+    private var recentHistoriesSection: some View {
+        if !viewModel.recentHistories.isEmpty {
+            Section("最近プレイした記事") {
+                ForEach(viewModel.recentHistories) { history in
+                    NavigationLink(value: history.articleTitle) {
+                        recentHistoryRow(history)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 最近プレイ 1 行の表示
+    private func recentHistoryRow(_ history: PlayHistory) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(history.articleTitle)
+            HStack {
+                Text(QuizDifficulty(rawValue: history.difficulty)?.displayName ?? "-")
+                Spacer()
+                Text("スコア \(history.score)")
+                Text("\(history.correctCount)/\(history.totalCount)")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
         }
     }
 
@@ -157,6 +198,7 @@ struct CategoryArticlesView: View {
 
 #Preview {
     HomeView(wikipediaService: PreviewMockWikipediaService())
+        .modelContainer(for: PlayHistory.self, inMemory: true)
 }
 
 /// SwiftUI プレビュー専用のモック
