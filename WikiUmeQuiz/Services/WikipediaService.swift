@@ -35,7 +35,10 @@ enum WikipediaServiceError: LocalizedError, Equatable {
 /// - `extractTextAndLinks(html:)` HTML パース（純粋関数、単体テスト用）
 ///
 /// URLSession を注入可能にすることでモックテストをサポートする。
-final class WikipediaService {
+///
+/// `Sendable` 適合: immutable な `session` のみを保持するため、
+/// actor をまたいで渡しても安全。@MainActor 隔離された ViewModel から呼び出すために必要。
+final class WikipediaService: Sendable {
 
     // MARK: - Constants
 
