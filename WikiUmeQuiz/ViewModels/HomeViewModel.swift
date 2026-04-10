@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftData
 
 /// ホーム画面の ViewModel
 ///
@@ -7,6 +8,7 @@ import Observation
 /// - 検索クエリ `query` の保持
 /// - 検索の実行（`performSearch`）
 /// - 検索結果・ローディング・エラーメッセージの状態管理
+/// - 最近プレイした記事一覧の読み込み（Phase 6）
 ///
 /// `@Observable` を採用し SwiftUI から状態変更を購読する。
 /// debounce（500ms）は View 側で `onChange` + `Task.sleep` で実装するため、
@@ -14,6 +16,11 @@ import Observation
 @MainActor
 @Observable
 final class HomeViewModel {
+
+    // MARK: - Constants
+
+    /// 「最近プレイした記事」セクションに表示する最大件数
+    static let recentHistoriesLimit: Int = 10
 
     // MARK: - Dependencies
 
@@ -33,10 +40,27 @@ final class HomeViewModel {
     /// エラーメッセージ（nil のとき UI に表示しない）
     private(set) var errorMessage: String?
 
+    /// 最近プレイした履歴（最新順・最大 `recentHistoriesLimit` 件）
+    private(set) var recentHistories: [PlayHistory] = []
+
     // MARK: - Init
 
     init(wikipediaService: WikipediaServiceProtocol) {
         self.wikipediaService = wikipediaService
+    }
+
+    // MARK: - Recent histories
+
+    /// 最近プレイした履歴を SwiftData から読み込む
+    ///
+    /// - Parameter context: `@Environment(\.modelContext)` から渡される `ModelContext`
+    ///
+    /// View 側の `.task` などから呼ばれる想定。
+    /// 呼び出しごとに `PlayHistoryRepository` を生成するが、
+    /// Repository は軽量なラッパーのためコストは小さい。
+    func loadRecentHistories(context: ModelContext) {
+        let repository = PlayHistoryRepository(context: context)
+        self.recentHistories = repository.fetchRecent(limit: Self.recentHistoriesLimit)
     }
 
     // MARK: - Actions
