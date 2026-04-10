@@ -1,7 +1,7 @@
 import Foundation
 
 /// 穴埋め候補のタイプ
-enum BlankType: String, Codable {
+enum BlankType: String, Codable, Hashable {
     /// カタカナ語（2文字以上）
     case katakana
     /// 数字（3桁以上）
@@ -13,7 +13,7 @@ enum BlankType: String, Codable {
 }
 
 /// 穴埋め 1 問分のデータ
-struct QuizQuestion: Identifiable, Equatable {
+struct QuizQuestion: Identifiable, Equatable, Hashable {
     let id: UUID
     /// 出題番号（1始まり）
     let number: Int
@@ -34,7 +34,7 @@ struct QuizQuestion: Identifiable, Equatable {
 ///
 /// 難易度に応じて抽出候補のうち何割を穴埋めにするかが決まる。
 /// スコア計算時は `scoreMultiplier` を使用する。
-enum QuizDifficulty: String, Codable, CaseIterable {
+enum QuizDifficulty: String, Codable, CaseIterable, Hashable {
     /// かんたん: 候補の 10%
     case easy
     /// ふつう: 候補の 25%
@@ -71,7 +71,9 @@ enum QuizDifficulty: String, Codable, CaseIterable {
 }
 
 /// 生成されたクイズ全体
-struct Quiz {
+///
+/// `Hashable` は `navigationDestination(item:)` で遷移対象として扱うために必要。
+struct Quiz: Hashable {
     /// `[1:____]` 等のプレースホルダを含む表示用テキスト
     let displayText: String
     /// 問題一覧（番号順）
