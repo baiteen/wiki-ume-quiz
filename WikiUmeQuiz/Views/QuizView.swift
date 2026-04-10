@@ -1,51 +1,65 @@
 import SwiftUI
 
-/// クイズ画面
+/// クイズ画面（B案: 1 問 1 画面集中型）
 ///
 /// 責務:
-/// - 穴埋めテキストの表示（Phase 8 で AttributedString ハイライトに刷新）
+/// - 現在の穴埋め問題を画面中央に「？？？？」として大きく表示する
+/// - 現問題を含む文の前後文脈（既定で前後 1 文ずつ）を小さく表示する
 /// - 現在の問題への入力（TextField + 決定ボタン）
 /// - ヒント／ギブアップ操作
 /// - 経過時間・進捗・直近の解答結果の表示
 ///
-/// クイズの状態管理は `QuizViewModel` に委譲する。
-/// Phase 7 以降は完了時に親 `HomeView` 由来の `navigationPath` に
-/// `ResultRoute` を append して `ResultView` へ遷移する。
+/// 方針変更（2026-04-11 CEO判断）:
+/// 従来の A 案「本文全体表示型」ではクイズ中に Wikipedia 記事全文を読む
+/// 体験が強制され、穴埋め箇所を視覚的に見つけづらい課題があった。
+/// CEO から「大人向け／読書体験いらない／すぐ」との判断を受けて B 案に刷新。
+/// 全文スクロールを廃止し、現問題だけにフォーカスする。
 ///
-/// Phase 8 UX 改善:
-/// - `[N:____]` を AttributedString で装飾し、現在の問題はオレンジ背景でハイライト、
-///   未来の問題はグレー、解答済みは正解→緑、不正解→赤打消し線で表示する。
-/// - 画面上部に「いまの もんだい」バッジを大きく表示し、現在の問題が
-///   どこを探すべきかを直感的に伝える。
+/// 文の切り出しロジック:
+/// `QuizViewModel.contextForCurrentQuestion()` が `Quiz.displayText` を
+/// 句点「。」で分割し、現問題を含む文の前後 N 文を返す。
+/// 本 View は得られた前/現/後のテキスト中の `[N:____]` プレースホルダを
+/// `AttributedString` で装飾して描画する。
 struct QuizView: View {
 
     // MARK: - Layout constants
 
-    private static let bodyFontSize: CGFloat = 17
+    /// 現問題（中央大表示）のフォントサイズ
+    private static let currentSentenceFontSize: CGFloat = 22
+    /// 周辺文脈（前後の文）のフォントサイズ
+    private static let contextFontSize: CGFloat = 13
+    /// 現問題カードの角丸
+    private static let currentCardCornerRadius: CGFloat = 16
+    /// 周辺文脈ブロックの最大高さ（スクロール許容）
+    private static let contextBlockMaxHeight: CGFloat = 90
+    /// 直近の解答結果を何件まで表示するか
     private static let recentResultsCount: Int = 3
-    private static let badgeCornerRadius: CGFloat = 12
 
     // MARK: - Highlight constants
 
-    /// 現在の問題ハイライト背景色
+    /// 現問題の「？？？？」プレースホルダ背景色
     private static let currentBlankBackground = Color.orange
-    /// 現在の問題ハイライト文字色
+    /// 現問題の「？？？？」プレースホルダ文字色
     private static let currentBlankForeground = Color.white
-    /// 未来の問題（未解答）の文字色
+    /// 未来（未解答）の穴埋めの文字色
     private static let upcomingBlankForeground = Color.gray
     /// 正解時の文字色
     private static let correctAnswerForeground = Color.green
     /// 不正解時の文字色
     private static let incorrectAnswerForeground = Color.red
-    /// バッジ背景色
-    private static let badgeBackground = Color.orange.opacity(0.15)
+    /// 現問題カードの背景色
+    private static let currentCardBackground = Color.orange.opacity(0.12)
+
+    // MARK: - Blank display placeholders
+
+    /// 現問題をプレースホルダで表示する際の文字列
+    private static let currentPlaceholderText = "？？？？"
+    /// 未来問題をプレースホルダで表示する際の文字列
+    private static let upcomingPlaceholderText = "＿＿＿＿"
 
     // MARK: - Blank rendering
 
     /// 各穴埋めの表示状態
-    ///
-    /// `attributedDisplayText` を構築する際に各穴埋めをどの装飾で
-    /// 描画するか決定するために使用する内部列挙型。
     private enum BlankDisplayState {
         /// 現在解答中の問題
         case current
@@ -69,23 +83,17 @@ struct QuizView: View {
     // MARK: - Body
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 12) {
             header
-
-            // Phase 8: 画面上部の「いまの もんだい」バッジ
-            // 本文中の穴埋めを探さなくても、現在問題が常時はっきり見えるようにする
-            if let current = viewModel.currentQuestion {
-                currentQuestionBadge(current)
-            }
 
             Divider()
 
-            ScrollView {
-                Text(attributedDisplayText)
-                    .font(.system(size: Self.bodyFontSize))
-                    .padding()
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
+            if let question = viewModel.currentQuestion,
+               let context = viewModel.contextForCurrentQuestion() {
+                focusedQuizArea(question: question, context: context)
+            } else {
+                // 完了直後の空状態（自動で ResultView へ遷移する）
+                Spacer()
             }
 
             Divider()
@@ -114,19 +122,74 @@ struct QuizView: View {
         }
     }
 
-    // MARK: - Attributed display text
+    // MARK: - Focused quiz area (B案 コア)
 
-    /// 穴埋め箇所をハイライトした本文
+    /// B 案の中心領域：前方文脈 / 現問題 / 後方文脈 を縦に並べる
     ///
-    /// `viewModel.quiz.displayText` 中の `[N:____]` パターンを順に検索し、
-    /// 各穴埋めの状態（現在 / 未来 / 正解 / 不正解）に応じた装飾を適用する。
+    /// - Parameters:
+    ///   - question: 現在出題中の `QuizQuestion`
+    ///   - context: `QuizViewModel.contextForCurrentQuestion()` が返す周辺文脈
+    private func focusedQuizArea(question: QuizQuestion, context: QuizContext) -> some View {
+        VStack(spacing: 12) {
+            contextBlock(text: context.beforeText, alignment: .leading)
+
+            currentQuestionCard(question: question, sentence: context.currentSentence)
+
+            contextBlock(text: context.afterText, alignment: .leading)
+        }
+        .padding(.horizontal)
+    }
+
+    /// 前後の文脈を小さめのグレーテキストで表示するブロック
     ///
-    /// - 現在: オレンジ背景・白文字・太字
-    /// - 未来: グレー文字・下線（まだ未出題）
-    /// - 正解: 緑色・太字で正解の文字列に置換
-    /// - 不正解: 赤色・打消し線で「ユーザー入力（正解）」に置換
-    private var attributedDisplayText: AttributedString {
-        var text = AttributedString(viewModel.quiz.displayText)
+    /// 空文字（冒頭／末尾問題のケース）では空の `Color.clear` を返し、
+    /// レイアウト上の隙間を潰さないようにする。
+    @ViewBuilder
+    private func contextBlock(text: String, alignment: HorizontalAlignment) -> some View {
+        if text.isEmpty {
+            // スペースを確保しない（高さ 0）
+            Color.clear.frame(height: 0)
+        } else {
+            ScrollView {
+                Text(decoratedText(text))
+                    .font(.system(size: Self.contextFontSize))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .textSelection(.enabled)
+            }
+            .frame(maxHeight: Self.contextBlockMaxHeight)
+        }
+    }
+
+    /// 中央に大きく表示する現問題カード
+    ///
+    /// 現問題の文を `AttributedString` で装飾し、
+    /// `[現問題番号:____]` は「？？？？」にハイライト表示する。
+    /// 同一文に含まれる他の穴埋め（解答済み／未来）は通常装飾で描画する。
+    private func currentQuestionCard(question: QuizQuestion, sentence: String) -> some View {
+        VStack(spacing: 8) {
+            Text("問 \(question.number)  [\(typeLabel(question.type))]")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Text(decoratedText(sentence))
+                .font(.system(size: Self.currentSentenceFontSize, weight: .medium))
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Self.currentCardBackground)
+                .cornerRadius(Self.currentCardCornerRadius)
+        }
+    }
+
+    // MARK: - Attributed decoration
+
+    /// 指定テキストに含まれる全ての `[N:____]` プレースホルダを装飾する
+    ///
+    /// 解答済み／現問題／未来 の状態に応じて置換・装飾を適用する。
+    /// 前方文脈・現問題文・後方文脈のいずれにも共通して使える。
+    private func decoratedText(_ raw: String) -> AttributedString {
+        var text = AttributedString(raw)
 
         for blank in viewModel.quiz.blanks {
             let marker = "[\(blank.number):____]"
@@ -140,11 +203,6 @@ struct QuizView: View {
     }
 
     /// 1 つの穴埋めに対する装飾を `AttributedString` に適用する
-    ///
-    /// - Parameters:
-    ///   - state: 穴埋めの表示状態
-    ///   - range: `[N:____]` プレースホルダの範囲
-    ///   - text: 装飾対象の `AttributedString`（in-out）
     private func applyBlankDecoration(
         state: BlankDisplayState,
         range: Range<AttributedString.Index>,
@@ -152,26 +210,28 @@ struct QuizView: View {
     ) {
         switch state {
         case .current:
-            text[range].font = .system(size: Self.bodyFontSize, weight: .bold)
-            text[range].backgroundColor = Self.currentBlankBackground
-            text[range].foregroundColor = Self.currentBlankForeground
+            var replacement = AttributedString(Self.currentPlaceholderText)
+            replacement.font = .system(size: Self.currentSentenceFontSize, weight: .bold)
+            replacement.backgroundColor = Self.currentBlankBackground
+            replacement.foregroundColor = Self.currentBlankForeground
+            text.replaceSubrange(range, with: replacement)
 
         case .upcoming:
-            text[range].foregroundColor = Self.upcomingBlankForeground
-            text[range].underlineStyle = .single
+            var replacement = AttributedString(Self.upcomingPlaceholderText)
+            replacement.foregroundColor = Self.upcomingBlankForeground
+            text.replaceSubrange(range, with: replacement)
 
         case .correct(let answer):
             var replacement = AttributedString(answer)
             replacement.foregroundColor = Self.correctAnswerForeground
-            replacement.font = .system(size: Self.bodyFontSize, weight: .bold)
+            replacement.font = .system(size: Self.currentSentenceFontSize, weight: .bold)
             text.replaceSubrange(range, with: replacement)
 
         case .incorrect(let userAnswer, let correctAnswer):
-            // 未回答の場合は "(未回答)" の代替表示にする
             let displayedUserAnswer = userAnswer.isEmpty ? "(未回答)" : userAnswer
             var replacement = AttributedString("\(displayedUserAnswer) (\(correctAnswer))")
             replacement.foregroundColor = Self.incorrectAnswerForeground
-            replacement.font = .system(size: Self.bodyFontSize, weight: .bold)
+            replacement.font = .system(size: Self.currentSentenceFontSize, weight: .bold)
             replacement.strikethroughStyle = .single
             text.replaceSubrange(range, with: replacement)
         }
@@ -196,32 +256,6 @@ struct QuizView: View {
             return .current
         }
         return .upcoming
-    }
-
-    // MARK: - Current question badge
-
-    /// 画面上部の「いまの もんだい」バッジ
-    ///
-    /// 大きな文字で現在の問題番号と種別を表示し、
-    /// プレイヤーが本文中の穴埋めを見失わないようにする。
-    private func currentQuestionBadge(_ question: QuizQuestion) -> some View {
-        VStack(spacing: 4) {
-            Text("いまの もんだい")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 8) {
-                Text("問 \(question.number)")
-                    .font(.title2.bold())
-                Text("[\(typeLabel(question.type))]")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding()
-        .frame(maxWidth: .infinity)
-        .background(Self.badgeBackground)
-        .cornerRadius(Self.badgeCornerRadius)
-        .padding(.horizontal)
     }
 
     // MARK: - Navigation
@@ -266,9 +300,6 @@ struct QuizView: View {
     /// 現在の問題に対する入力欄とヒントボタンを表示する
     private func currentQuestionSection(_ question: QuizQuestion) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("問\(question.number)（\(typeLabel(question.type))）")
-                .font(.caption)
-                .foregroundStyle(.secondary)
             HStack {
                 TextField("ここに答えを入力", text: $userInput)
                     .textFieldStyle(.roundedBorder)
@@ -348,11 +379,11 @@ struct QuizView: View {
 
 #Preview {
     let quiz = Quiz(
-        displayText: "[1:____]は高さ[2:____]メートルの[3:____]です。",
+        displayText: "東京タワーは、東京都港区芝公園にある電波塔である。正式名称は[1:____]。高さは[2:____]メートルで、完成当時は自立式鉄塔として世界一の高さだった。塔の愛称として[3:____]が広く親しまれている。",
         blanks: [
-            QuizQuestion(number: 1, answer: "タワー", type: .katakana),
+            QuizQuestion(number: 1, answer: "日本電波塔", type: .link),
             QuizQuestion(number: 2, answer: "333", type: .number),
-            QuizQuestion(number: 3, answer: "電波塔", type: .link),
+            QuizQuestion(number: 3, answer: "タワー", type: .katakana),
         ],
         difficulty: .normal
     )

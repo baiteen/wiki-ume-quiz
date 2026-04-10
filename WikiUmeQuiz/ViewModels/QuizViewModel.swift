@@ -21,6 +21,17 @@ final class QuizViewModel {
     /// タイマー更新間隔（ミリ秒）。UI 更新コストを抑えるため 500ms とする
     private static let timerTickMilliseconds = 500
 
+    /// 周辺文脈抽出時の既定前後文数（B案 1問1画面集中型 UI 用）
+    ///
+    /// 現問題を含む文の前後、それぞれ何文を併せて表示するかのデフォルト値。
+    /// View 側から必要に応じて任意の値を渡せる。
+    static let defaultSurroundingLines: Int = 1
+
+    /// 文の区切り文字（日本語句点）
+    ///
+    /// `splitIntoSentences` で使用する。Wikipedia 本文は句点「。」で文が区切られる前提。
+    private static let sentenceTerminator: Character = "。"
+
     // MARK: - Input
 
     /// 出題対象のクイズ
@@ -177,6 +188,72 @@ final class QuizViewModel {
             currentIndex += 1
         }
         complete()
+    }
+
+    // MARK: - Context Extraction (B案 1問1画面集中型)
+
+    /// 現問題を中心とした周辺文脈を返す
+    ///
+    /// `quiz.displayText` を句点「。」で文に分割し、現問題の
+    /// `[N:____]` プレースホルダを含む文と、その前後 `surroundingLines` 文を
+    /// 切り出して `QuizContext` として返す。
+    ///
+    /// - Parameter surroundingLines: 前後それぞれに含める文の数（既定: 1）
+    /// - Returns: 現問題が存在しない（完了済み or 問題なし）場合は `nil`
+    ///
+    /// View 側では `currentSentence` 中の `[N:____]` を装飾して描画する。
+    func contextForCurrentQuestion(
+        surroundingLines: Int = QuizViewModel.defaultSurroundingLines
+    ) -> QuizContext? {
+        guard let current = currentQuestion else { return nil }
+
+        let marker = "[\(current.number):____]"
+        let sentences = Self.splitIntoSentences(quiz.displayText)
+
+        guard let currentIdx = sentences.firstIndex(where: { $0.contains(marker) }) else {
+            return nil
+        }
+
+        let beforeStart = max(0, currentIdx - surroundingLines)
+        let afterEnd = min(sentences.count - 1, currentIdx + surroundingLines)
+
+        let beforeText = sentences[beforeStart..<currentIdx].joined()
+        let currentSentence = sentences[currentIdx]
+        let afterText: String
+        if currentIdx + 1 <= afterEnd {
+            afterText = sentences[(currentIdx + 1)...afterEnd].joined()
+        } else {
+            afterText = ""
+        }
+
+        return QuizContext(
+            beforeText: beforeText,
+            currentSentence: currentSentence,
+            afterText: afterText
+        )
+    }
+
+    /// テキストを句点で文に分割する
+    ///
+    /// 句点は各文の末尾に保持される（"AAA。BBB。" → ["AAA。", "BBB。"]）。
+    /// 末尾に句点のない断片も 1 文として返す（"AAA" → ["AAA"]）。
+    ///
+    /// DRY の観点から static 関数として切り出し、将来 StringNormalizer 等から
+    /// 再利用できる形にしておく。
+    private static func splitIntoSentences(_ text: String) -> [String] {
+        var result: [String] = []
+        var buffer = ""
+        for char in text {
+            buffer.append(char)
+            if char == sentenceTerminator {
+                result.append(buffer)
+                buffer = ""
+            }
+        }
+        if !buffer.isEmpty {
+            result.append(buffer)
+        }
+        return result
     }
 
     // MARK: - Private
