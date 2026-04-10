@@ -1,0 +1,14 @@
+# Xcode
+build/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+*.swp
+.DS_Store
+
+# xcodegen 生成物（project.yml から再生成可能）
+*.xcodeproj
+
+# Logs
+debug.log
+*.log
