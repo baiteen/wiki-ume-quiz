@@ -155,4 +155,119 @@ final class QuizViewModelTests: XCTestCase {
         let vm = QuizViewModel(quiz: makeQuiz(), articleTitle: "東京タワー")
         XCTAssertEqual(vm.elapsedTimeText, "00:00")
     }
+
+    // MARK: - 周辺文脈抽出 (B案 1問1画面集中型)
+
+    /// B 案用のフィクスチャ：多段の文と複数の穴埋めを含む displayText
+    private func makeContextQuiz() -> Quiz {
+        // 5 つの文にそれぞれ穴埋めを散らす
+        let displayText =
+            "AAA。" +
+            "[1:____]は第一の文。" +
+            "BBB。" +
+            "[2:____]は第三の文、そこに[3:____]もある。" +
+            "CCC。"
+        let blanks = [
+            QuizQuestion(number: 1, answer: "甲", type: .link),
+            QuizQuestion(number: 2, answer: "乙", type: .link),
+            QuizQuestion(number: 3, answer: "丙", type: .link),
+        ]
+        return Quiz(displayText: displayText, blanks: blanks, difficulty: .normal)
+    }
+
+    @MainActor
+    func test_contextForCurrentQuestion_returnsNilWhenCompleted() {
+        let vm = QuizViewModel(quiz: makeQuiz(), articleTitle: "東京タワー")
+        vm.giveUp()
+        XCTAssertNil(vm.contextForCurrentQuestion())
+    }
+
+    @MainActor
+    func test_contextForCurrentQuestion_firstQuestion_returnsBeforeAndAfter() {
+        let vm = QuizViewModel(quiz: makeContextQuiz(), articleTitle: "サンプル")
+        let ctx = vm.contextForCurrentQuestion()
+        XCTAssertNotNil(ctx)
+        XCTAssertEqual(ctx?.beforeText, "AAA。")
+        XCTAssertEqual(ctx?.currentSentence, "[1:____]は第一の文。")
+        XCTAssertEqual(ctx?.afterText, "BBB。")
+    }
+
+    @MainActor
+    func test_contextForCurrentQuestion_secondQuestion_skipsConsumedSentences() {
+        // 問1解答後、問2は「[2:____]は第三の文、そこに[3:____]もある。」の文
+        let vm = QuizViewModel(quiz: makeContextQuiz(), articleTitle: "サンプル")
+        vm.submitAnswer("甲")
+        let ctx = vm.contextForCurrentQuestion()
+        XCTAssertEqual(ctx?.beforeText, "BBB。")
+        XCTAssertEqual(ctx?.currentSentence, "[2:____]は第三の文、そこに[3:____]もある。")
+        XCTAssertEqual(ctx?.afterText, "CCC。")
+    }
+
+    @MainActor
+    func test_contextForCurrentQuestion_multipleBlanksInSameSentence_staysInSameSentence() {
+        // 問2の次は問3だが、問3も「[2:____]は第三の文、そこに[3:____]もある。」の同一文にある
+        let vm = QuizViewModel(quiz: makeContextQuiz(), articleTitle: "サンプル")
+        vm.submitAnswer("甲") // 問1 完了
+        vm.submitAnswer("乙") // 問2 完了、現在は問3
+        let ctx = vm.contextForCurrentQuestion()
+        XCTAssertEqual(ctx?.currentSentence, "[2:____]は第三の文、そこに[3:____]もある。")
+        XCTAssertEqual(ctx?.beforeText, "BBB。")
+        XCTAssertEqual(ctx?.afterText, "CCC。")
+    }
+
+    @MainActor
+    func test_contextForCurrentQuestion_atBeginning_hasEmptyBefore() {
+        let quiz = Quiz(
+            displayText: "[1:____]は冒頭。BBB。",
+            blanks: [QuizQuestion(number: 1, answer: "甲", type: .link)],
+            difficulty: .normal
+        )
+        let vm = QuizViewModel(quiz: quiz, articleTitle: "サンプル")
+        let ctx = vm.contextForCurrentQuestion()
+        XCTAssertEqual(ctx?.beforeText, "")
+        XCTAssertEqual(ctx?.currentSentence, "[1:____]は冒頭。")
+        XCTAssertEqual(ctx?.afterText, "BBB。")
+    }
+
+    @MainActor
+    func test_contextForCurrentQuestion_atEnd_hasEmptyAfter() {
+        let quiz = Quiz(
+            displayText: "AAA。[1:____]は末尾。",
+            blanks: [QuizQuestion(number: 1, answer: "甲", type: .link)],
+            difficulty: .normal
+        )
+        let vm = QuizViewModel(quiz: quiz, articleTitle: "サンプル")
+        let ctx = vm.contextForCurrentQuestion()
+        XCTAssertEqual(ctx?.beforeText, "AAA。")
+        XCTAssertEqual(ctx?.currentSentence, "[1:____]は末尾。")
+        XCTAssertEqual(ctx?.afterText, "")
+    }
+
+    @MainActor
+    func test_contextForCurrentQuestion_singleSentence_hasEmptyBothSides() {
+        let quiz = Quiz(
+            displayText: "[1:____]は単独",
+            blanks: [QuizQuestion(number: 1, answer: "甲", type: .link)],
+            difficulty: .normal
+        )
+        let vm = QuizViewModel(quiz: quiz, articleTitle: "サンプル")
+        let ctx = vm.contextForCurrentQuestion()
+        XCTAssertEqual(ctx?.beforeText, "")
+        XCTAssertEqual(ctx?.currentSentence, "[1:____]は単独")
+        XCTAssertEqual(ctx?.afterText, "")
+    }
+
+    @MainActor
+    func test_contextForCurrentQuestion_surroundingLines2_takesMoreSentences() {
+        let quiz = Quiz(
+            displayText: "AAA。BBB。[1:____]は中央。CCC。DDD。",
+            blanks: [QuizQuestion(number: 1, answer: "甲", type: .link)],
+            difficulty: .normal
+        )
+        let vm = QuizViewModel(quiz: quiz, articleTitle: "サンプル")
+        let ctx = vm.contextForCurrentQuestion(surroundingLines: 2)
+        XCTAssertEqual(ctx?.beforeText, "AAA。BBB。")
+        XCTAssertEqual(ctx?.currentSentence, "[1:____]は中央。")
+        XCTAssertEqual(ctx?.afterText, "CCC。DDD。")
+    }
 }
